@@ -7,18 +7,22 @@ ARG HOST=x86_64
 ARG BINUTILS_VERSION=2.24
 ARG GLIBC_VERSION=2.20
 ARG GCC_VERSION=4.9.2
-ARG LINUX_KERNEL_MAJOR=4
-ARG LINUX_KERNEL_MINOR=17.9
+ARG LINUX_KERNEL_VERSION=4.17.9
 
 # Environment
 ENV TARGET=arm-linux-gnueabihf
-ENV LINUX_KERNEL=$LINUX_KERNEL_MAJOR.$LINUX_KERNEL_MINOR
 ENV SOURCES=/opt/sources
 ENV BUILD=/opt/build
 ENV TOOLCHAIN=$BUILD/gcc-toolchain
 ENV ROOT=$TOOLCHAIN/$TARGET
 ENV TC_BUILD=$SOURCES/gcc-toolchain
 ENV PATH=$TOOLCHAIN/bin:$PATH
+
+# Get major version of the linux kernel
+RUN IFS='.' && \
+	read -ra V <<< "$LINUX_KERNEL_VERSION" && \
+	echo "the major version ${V[0]}" && \
+	echo "${V[0]}" > /LINUX_KERNEL_MAJOR
 
 # Tools
 RUN yum install -y epel-release && \
@@ -31,12 +35,12 @@ RUN mkdir -p $SOURCES && cd $_ &&\
 	wget https://ftpmirror.gnu.org/binutils/binutils-$BINUTILS_VERSION.tar.gz &&\
 	wget https://ftpmirror.gnu.org/glibc/glibc-$GLIBC_VERSION.tar.gz &&\
 	wget https://ftpmirror.gnu.org/gcc/gcc-$GCC_VERSION/gcc-$GCC_VERSION.tar.gz &&\
-	wget https://www.kernel.org/pub/linux/kernel/v${LINUX_KERNEL_MAJOR}.x/linux-${LINUX_KERNEL}.tar.gz &&\
+	wget https://www.kernel.org/pub/linux/kernel/v$(cat /LINUX_KERNEL_MAJOR).x/linux-${LINUX_KERNEL_VERSION}.tar.gz &&\
 	for f in *.tar*; do tar xf $f && rm -rf $f; done
 
 # Linux kernel headers
-RUN cd $SOURCES/linux-${LINUX_KERNEL} &&\
-	export KERNEL=kernel${LINUX_KERNEL_MAJOR} &&\
+RUN cd $SOURCES/linux-${LINUX_KERNEL_VERSION} &&\
+	export KERNEL=kernel$$(cat /LINUX_KERNEL_MAJOR) &&\
 	make ARCH=arm INSTALL_HDR_PATH=$ROOT headers_install
 
 # Binutils
