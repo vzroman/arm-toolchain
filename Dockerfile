@@ -40,7 +40,7 @@ RUN mkdir -p $SOURCES && cd $_ &&\
 
 # Linux kernel headers
 RUN cd $SOURCES/linux-${LINUX_KERNEL_VERSION} &&\
-	export KERNEL=kernel$$(cat /LINUX_KERNEL_MAJOR) &&\
+	export KERNEL=kernel$(cat /LINUX_KERNEL_MAJOR) &&\
 	make ARCH=arm INSTALL_HDR_PATH=$ROOT headers_install
 
 # Binutils
