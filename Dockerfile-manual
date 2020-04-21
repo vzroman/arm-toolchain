@@ -1,0 +1,118 @@
+FROM centos:7
+MAINTAINER Roman Vozzhenikov "vzroman@gmail.com"
+ENV REFRESHED_AT 2020-04-17
+
+# Toolchain version
+ARG HOST=x86_64
+ARG BINUTILS_VERSION=2.24
+ARG GLIBC_VERSION=2.20
+ARG GCC_VERSION=4.9.2
+ARG LINUX_KERNEL_VERSION=4.17.9
+
+# Environment
+ENV TARGET=arm-linux-gnueabihf
+ENV SOURCES=/opt/sources
+ENV BUILD=/opt/build
+ENV TOOLCHAIN=$BUILD/gcc-toolchain
+ENV ROOT=$TOOLCHAIN/$TARGET
+ENV TC_BUILD=$SOURCES/gcc-toolchain
+ENV PATH=$TOOLCHAIN/bin:$PATH
+
+# Get major version of the linux kernel
+RUN IFS='.' && \
+	read -ra V <<< "$LINUX_KERNEL_VERSION" && \
+	echo "the major version ${V[0]}" && \
+	echo "${V[0]}" > /LINUX_KERNEL_MAJOR
+
+# Tools
+RUN yum install -y epel-release && \
+	yum -y update && \
+	yum -y groupinstall "Development Tools" && \
+	yum -y install wget git bzip2 bison patch ncurses-term python3 R
+
+# Download sources
+RUN mkdir -p $SOURCES && cd $_ &&\
+	wget https://ftpmirror.gnu.org/binutils/binutils-$BINUTILS_VERSION.tar.gz &&\
+	wget https://ftpmirror.gnu.org/glibc/glibc-$GLIBC_VERSION.tar.gz &&\
+	wget https://ftpmirror.gnu.org/gcc/gcc-$GCC_VERSION/gcc-$GCC_VERSION.tar.gz &&\
+	wget https://www.kernel.org/pub/linux/kernel/v$(cat /LINUX_KERNEL_MAJOR).x/linux-${LINUX_KERNEL_VERSION}.tar.gz &&\
+	for f in *.tar*; do tar xf $f && rm -rf $f; done
+
+# Linux kernel headers
+RUN cd $SOURCES/linux-${LINUX_KERNEL_VERSION} &&\
+	export KERNEL=kernel$(cat /LINUX_KERNEL_MAJOR) &&\
+	make ARCH=arm INSTALL_HDR_PATH=$ROOT headers_install && \
+	mkdir -p $ROOT/usr && \
+	cp -R $ROOT/include $ROOT/usr
+
+# Binutils
+RUN mkdir -p $TC_BUILD/binutils && cd $_ && \
+	$SOURCES/binutils-$BINUTILS_VERSION/configure \
+		--prefix=$TOOLCHAIN \
+		--target=$TARGET \
+		--with-sysroot=$ROOT \
+		--with-arch=armv7-a \
+		--with-fpu=vfp \
+		--with-float=hard \
+		--disable-multilib && \
+	make -j4 && \
+	make install
+
+# GCC prerequisites
+RUN cd $SOURCES/gcc-$GCC_VERSION && \
+	contrib/download_prerequisites && \
+	rm -rf *.tar.*
+# GCC Bootstrap
+RUN mkdir -p $TC_BUILD/gcc && cd $_ && \
+	$SOURCES/gcc-$GCC_VERSION/configure \
+		--prefix=$TOOLCHAIN \
+		--target=$TARGET \
+ 		--with-sysroot=$ROOT  \
+ 		--with-fpu=vfp \
+		--with-float=hard \
+		--enable-languages=c,c++,fortran && \
+	make -j4 all-gcc && \
+	make install-gcc
+
+# Glibc Bootstrap
+RUN mkdir -p $TC_BUILD/glibc && cd $_ && \
+	CC=${TARGET}-gcc && \
+	$SOURCES/glibc-$GLIBC_VERSION/configure \
+		--prefix=$ROOT \
+		--build=$MACHTYPE \
+		--host=$TARGET \
+		--target=$TARGET \
+		--with-fpu=vfp \
+		--with-float=hard \
+		--with-headers=$ROOT/include \
+		--disable-multilib \
+		libc_cv_forced_unwind=yes && \
+	make \
+		install-bootstrap-headers=yes \
+		install-headers && \
+	make csu/subdir_lib && \
+	install csu/crt1.o csu/crti.o csu/crtn.o $ROOT/lib && \
+	arm-linux-gnueabihf-gcc \
+		-nostdlib -nostartfiles \
+		-shared -x c /dev/null -o $ROOT/lib/libc.so && \
+	touch $ROOT/include/gnu/stubs.h
+
+# GCC for glibc
+RUN cd $TC_BUILD/gcc && \
+	make -j4 all-target-libgcc && \
+	make install-target-libgcc
+
+# Glibc full
+RUN cd $TC_BUILD/glibc && \
+	make -j4 && \
+	make install
+# GCC full
+RUN cd $TC_BUILD/gcc && \
+	make -j4 && \
+	make install
+
+# Glibc full
+RUN cd $TC_BUILD/glibc && \
+	make install_root=$ROOT prefix="" install
+
+ENTRYPOINT [ "/bin/bash" ]
